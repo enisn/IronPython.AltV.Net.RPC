@@ -7,7 +7,7 @@ namespace IronPython.AltV.Net.RPC;
 
 public static class ServerRPC
 {
-    static RPCHandlersController Controller = new RPCHandlersController();
+    static RPCHandlersServerController Controller = new RPCHandlersServerController();
     static RPCRequestsController RequestsController = new RPCRequestsController();
 
     public static void On<TRequestBody, TResponseBody>(string methodName, Func<TRequestBody, TResponseBody> handler) where TRequestBody : new() =>
@@ -17,22 +17,24 @@ public static class ServerRPC
 
     public static Task<TResponseBody> ExecuteClientMethod<TResponseBody, TRequestBody>(IPlayer player, string methodName, TRequestBody body)
     {
+        var tcs = new TaskCompletionSource<TResponseBody>();
         var request = RequestsController.AddRequest(methodName, body);
 
         player.Emit("__ironPython:RPC:execute", JsonSerializer.Serialize(request));
-
-        TResponseBody? response = default;
 
         RequestsController.OnNewReponse += (newResponse) =>
         {
             if (newResponse.Id != request.Id) return;
 
-            response = JsonSerializer.Deserialize<TResponseBody>(newResponse.ResponseBody);
+            var response = JsonSerializer.Deserialize<TResponseBody>(newResponse.ResponseBody);
+
+            if (!tcs.TrySetResult(response))
+            {
+                tcs.SetCanceled();
+            }
         };
 
-        while (response == null) { }
-
-        return Task.FromResult(response)!;
+        return tcs.Task;
     }
 
     public static void InitServerRPC()
